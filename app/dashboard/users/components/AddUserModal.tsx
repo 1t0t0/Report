@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import NeoButton from '@/components/ui/NotionButton';
+import React, { useState } from 'react';
 import { createUser, createCarForDriver } from '../api/user';
 import notificationService from '@/lib/notificationService';
 import { TABS } from '../config/constants';
-import { DEFAULT_USER, DEFAULT_CAR } from '../config/constants';
 import useUserForm from '../hooks/useUserForm';
-import FormField from './forms/FormField';
-import { User, NewUser, NewCar } from '../types';
+import { checkEmailExists } from '../api/emailValidator';
+
 
 import DriverForm from './forms/DriverForm';
 import StaffForm from './forms/StaffForm';
@@ -60,87 +58,146 @@ const AddUserModal: React.FC<AddUserModalProps> = ({
   };
   
   // ฟังก์ชันบันทึกข้อมูลผู้ใช้
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+// แก้ไขฟังก์ชัน handleSubmit
+// แก้ไขฟังก์ชัน handleSubmit
+
+// แก้ไข handleSubmit ใน AddUserModal.tsx
+
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  try {
+    // ตรวจสอบข้อมูลที่จำเป็น
+    const isValid = validateForm();
+    if (!isValid) {
+      return;
+    }
     
+    setLoading(true);
+    
+    // ตรวจสอบอีเมลซ้ำก่อนที่จะดำเนินการต่อ
     try {
-      // ตรวจสอบข้อมูลที่จำเป็น
-      const isValid = validateForm();
-      if (!isValid) {
-        return;
-      }
-      
-      setLoading(true);
-      
-      // อัปโหลดรูปภาพ (ถ้ามี)
-      let idCardImageUrl = '';
-      let userImageUrl = '';
-      
-      if (idCardImageFile) {
-        idCardImageUrl = await uploadImage(idCardImageFile, 'idCard');
-      }
-      
-      if (userImageFile) {
-        userImageUrl = await uploadImage(userImageFile, 'user');
-      }
-      
-      // เตรียมข้อมูลผู้ใช้สำหรับส่งไปยัง API
-      const userData: NewUser = {
-        name: user.name,
-        email: user.email,
-        password: user.password || '',
-        role: user.role,
-        phone: user.phone,
-      };
-      
-      // เพิ่มข้อมูลเฉพาะตามประเภทผู้ใช้
-      if (user.role === 'driver' || user.role === 'staff') {
-        userData.status = 'active';
-        userData.checkInStatus = 'checked-out';
-        userData.idCardNumber = user.idCardNumber;
-        
-        if (idCardImageUrl) {
-          userData.idCardImage = idCardImageUrl;
+      // ถ้ามี API ตรวจสอบอีเมล
+      if (typeof checkEmailExists === 'function') {
+        const emailExists = await checkEmailExists(user.email);
+        if (emailExists) {
+          notificationService.error('ມີຜູ້ໃຊ້ທີ່ໃຊ້ອີເມວນີ້ແລ້ວ');
+          setLoading(false);
+          return;
         }
-        
-        if (userImageUrl) {
-          userData.userImage = userImageUrl;
-        }
-      } else if (user.role === 'station') {
-        userData.location = user.location;
+      }
+    } catch (emailCheckError) {
+      console.warn('Email check failed:', emailCheckError);
+      // ดำเนินการต่อแม้ว่าการตรวจสอบอีเมลจะล้มเหลว
+    }
+    
+    // อัปโหลดรูปภาพ (ถ้ามี)
+    let idCardImageUrl = '';
+    let userImageUrl = '';
+    
+    if (idCardImageFile) {
+      idCardImageUrl = await uploadImage(idCardImageFile, 'idCard');
+    }
+    
+    if (userImageFile) {
+      userImageUrl = await uploadImage(userImageFile, 'user');
+    }
+    
+    // เตรียมข้อมูลผู้ใช้สำหรับส่งไปยัง API
+    const userData: NewUser = {
+      name: user.name,
+      email: user.email,
+      password: user.password || '',
+      role: user.role,
+      phone: user.phone,
+    };
+    
+    // เพิ่มข้อมูลเฉพาะตามประเภทผู้ใช้
+    if (user.role === 'driver' || user.role === 'staff') {
+      userData.status = 'active';
+      userData.checkInStatus = 'checked-out';
+      userData.idCardNumber = user.idCardNumber;
+      
+      if (idCardImageUrl) {
+        userData.idCardImage = idCardImageUrl;
       }
       
-      // สร้างผู้ใช้
-      const createdUser = await createUser(userData);
+      if (userImageUrl) {
+        userData.userImage = userImageUrl;
+      }
+    } else if (user.role === 'station') {
+      userData.location = user.location;
+    }
+    
+    console.log('Creating user with data:', userData);
+    
+    // สร้างผู้ใช้
+    let createdUser = null;
+    try {
+      createdUser = await createUser(userData);
+      console.log('User created successfully:', createdUser);
+    } catch (createUserError: any) {
+      console.error('Error creating user:', createUserError);
       
-      // ถ้าเป็นคนขับ ให้สร้างข้อมูลรถด้วย
-      if (user.role === 'driver' && createdUser) {
+      // ตรวจสอบข้อความข้อผิดพลาดเพื่อหาคำว่า "email" หรือ "already exists"
+      if (createUserError.message && 
+          (createUserError.message.toLowerCase().includes('email') || 
+           createUserError.message.toLowerCase().includes('already exists'))) {
+        notificationService.error('ມີຜູ້ໃຊ້ທີ່ໃຊ້ອີເມວນີ້ແລ້ວ');
+      } else {
+        notificationService.error(`ເກີດຂໍ້ຜິດພາດ: ${createUserError.message}`);
+      }
+      
+      setLoading(false);
+      return;
+    }
+    
+    // ถ้าเป็นคนขับ ให้สร้างข้อมูลรถด้วย
+    if (user.role === 'driver' && createdUser && createdUser._id) {
+      try {
+        console.log('Creating car for driver:', createdUser._id);
+        
         const carData: NewCar = {
-          car_name: car.car_name,
-          car_capacity: car.car_capacity,
-          car_registration: car.car_registration,
-          car_type: car.car_type,
+          car_name: car.car_name || '',
+          car_capacity: car.car_capacity || 10,
+          car_registration: car.car_registration || '',
+          car_type: car.car_type || 'van',
         };
         
-        await createCarForDriver(carData, createdUser._id);
+        // ตรวจสอบว่ามีข้อมูลรถครบถ้วนหรือไม่
+        if (!carData.car_name || !carData.car_registration) {
+          console.warn('Missing car data, skipping car creation');
+        } else {
+          console.log('Car data to create:', carData);
+          
+          const createdCar = await createCarForDriver(carData, createdUser._id);
+          console.log('Car created successfully:', createdCar);
+        }
+      } catch (carError: any) {
+        console.error('Error creating car:', carError);
+        notificationService.warning(`ສ້າງຜູ້ໃຊ້ສຳເລັດແລ້ວ ແຕ່ມີຂໍ້ຜິດພາດໃນການສ້າງລົດ: ${carError.message}`);
+        
+        // ยังให้ทำงานต่อเนื่องถึงแม้การสร้างรถจะล้มเหลว
       }
-      
-      // รีเซ็ตฟอร์มและรีเฟรชข้อมูล
-      resetForm();
-      onSuccess();
-      onClose();
-      
-      // แสดงข้อความสำเร็จ
-      notificationService.success(`ເພີ່ມ${TABS[activeTab]}ສຳເລັດແລ້ວ`);
-      
-    } catch (error: any) {
-      console.error('Error adding user:', error);
-      notificationService.error(`ເກີດຂໍ້ຜິດພາດ: ${error.message}`);
-    } finally {
-      setLoading(false);
-      setUploadProgress(0);
     }
-  };
+    
+    // รีเซ็ตฟอร์มและรีเฟรชข้อมูล
+    resetForm();
+    onSuccess();
+    onClose();
+    
+    // แสดงข้อความสำเร็จ
+    notificationService.success(`ເພີ່ມ${TABS[activeTab]}ສຳເລັດແລ້ວ`);
+    
+  } catch (error: any) {
+    console.error('Error adding user:', error);
+    notificationService.error(`ເກີດຂໍ້ຜິດພາດ: ${error.message}`);
+  } finally {
+    setLoading(false);
+    setUploadProgress(0);
+  }
+};
   
   // เลือกฟอร์มตามประเภทผู้ใช้
   const renderForm = () => {

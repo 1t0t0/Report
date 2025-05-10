@@ -4,8 +4,9 @@ import connectDB from '@/lib/mongodb';
 import Car from '@/models/Car';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import mongoose from 'mongoose';
 
-// GET - Get a single car by ID
+// GET - Get a single car by ID with driver information
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
@@ -22,8 +23,20 @@ export async function GET(
 
     await connectDB();
     
-    // Find car by ID
-    const car = await Car.findById(params.id);
+    // Validate ID
+    if (!mongoose.Types.ObjectId.isValid(params.id)) {
+      return NextResponse.json(
+        { error: 'Invalid car ID format' },
+        { status: 400 }
+      );
+    }
+    
+    // Find car by ID and populate user data
+    const car = await Car.findById(params.id)
+      .populate({
+        path: 'user_id',
+        select: 'name email role employeeId phone checkInStatus status'
+      });
     
     if (!car) {
       return NextResponse.json(
@@ -42,7 +55,7 @@ export async function GET(
   }
 }
 
-// PUT - Update a car
+// PUT - Update a car (including assigning/removing driver)
 export async function PUT(
   request: Request,
   { params }: { params: { id: string } }
@@ -61,22 +74,32 @@ export async function PUT(
     
     // Parse request body
     const body = await request.json();
-    const { car_name, car_capacity, car_registration, user_id } = body;
+    const { car_name, car_capacity, car_registration, car_type, user_id } = body;
     
     // Build update object
     const updateData: any = {};
     
-    if (car_name) updateData.car_name = car_name;
-    if (car_capacity) updateData.car_capacity = car_capacity;
-    if (car_registration) updateData.car_registration = car_registration;
-    if (user_id) updateData.user_id = user_id;
+    if (car_name !== undefined) updateData.car_name = car_name;
+    if (car_capacity !== undefined) updateData.car_capacity = car_capacity;
+    if (car_registration !== undefined) updateData.car_registration = car_registration;
+    if (car_type !== undefined) updateData.car_type = car_type;
+    
+    // Handle special case: explicitly setting null to remove driver association
+    if (user_id === null) {
+      updateData.user_id = null;
+    } else if (user_id !== undefined) {
+      updateData.user_id = user_id;
+    }
     
     // Find and update car
     const car = await Car.findByIdAndUpdate(
       params.id,
       { $set: updateData },
       { new: true }
-    );
+    ).populate({
+      path: 'user_id',
+      select: 'name email role employeeId phone checkInStatus status'
+    });
     
     if (!car) {
       return NextResponse.json(

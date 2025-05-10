@@ -11,12 +11,14 @@ const menuItems = {
     { name: 'Tickets Sales', href: '/dashboard/tickets', exact: true },
     { name: 'Tickets Info', href: '/dashboard/tickets/history', exact: false }, 
     { name: 'User Management', href: '/dashboard/users', exact: false },
+    { name: 'Cars', href: '/dashboard/cars', exact: false }, // เพิ่ม Menu Cars
     { name: 'Revenue Sharing', href: '/dashboard/revenue', exact: false },
   ],
   staff: [
     { name: 'Tickets Sales', href: '/dashboard/tickets', exact: true },
     { name: 'Tickets Info', href: '/dashboard/tickets/history', exact: false },
-    { name: 'User Management', href: '/dashboard/users', exact: false }, // เพิ่มสิทธิ์ให้ Staff เข้าถึง User Management
+    { name: 'User Management', href: '/dashboard/users', exact: false },
+    { name: 'Cars', href: '/dashboard/cars', exact: false }, // เพิ่ม Menu Cars
   ],
   driver: [
     { name: 'My Income', href: '/driver-portal', exact: true },

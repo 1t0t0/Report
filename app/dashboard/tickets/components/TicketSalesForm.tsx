@@ -46,7 +46,7 @@ const TicketSalesForm: React.FC<TicketSalesFormProps> = ({
             }`}
             onClick={() => setPaymentMethod('qr')}
           >
-            QR
+            ເງິນໂອນ
           </button>
         </div>
       </div>

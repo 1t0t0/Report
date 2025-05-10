@@ -1,3 +1,5 @@
+// แก้ไข useUserData hook
+
 import { useState, useCallback } from 'react';
 import { fetchAllUsers, fetchCarsByUser } from '../api/user';
 import { User, Driver, Car, ApiError } from '../types';
@@ -17,7 +19,15 @@ export default function useUserData() {
       setLoading(true);
       
       // ดึงข้อมูลผู้ใช้ทั้งหมด
-      const userData = await fetchAllUsers();
+      let userData: User[] = [];
+      
+      try {
+        userData = await fetchAllUsers();
+      } catch (userError: any) {
+        console.error('Error fetching users:', userError);
+        notificationService.error(`ບໍ່ສາມາດດຶງຂໍ້ມູນຜູ້ໃຊ້ໄດ້: ${userError.message}`);
+        userData = [];
+      }
       
       // แยกประเภทผู้ใช้
       const driverUsers = userData.filter((user: User) => user.role === 'driver');
@@ -28,8 +38,16 @@ export default function useUserData() {
       // ดึงข้อมูลรถที่เกี่ยวข้องกับคนขับ
       const driverIds = driverUsers.map(driver => driver._id);
       
+      let carsData: Car[] = [];
+      
       if (driverIds.length > 0) {
-        const carsData = await fetchCarsByUser();
+        try {
+          carsData = await fetchCarsByUser();
+        } catch (carError: any) {
+          console.error('Error fetching cars:', carError);
+          notificationService.warning(`ດຶງຂໍ້ມູນຜູ້ໃຊ້ສຳເລັດແລ້ວ ແຕ່ບໍ່ສາມາດດຶງຂໍ້ມູນລົດໄດ້: ${carError.message}`);
+          carsData = [];
+        }
         
         // Map รถให้กับคนขับแต่ละคน
         const driversWithCars = driverUsers.map((driver: Driver) => {
@@ -48,8 +66,14 @@ export default function useUserData() {
       setStations(stationUsers);
       
     } catch (error) {
-      console.error('Error fetching users:', error);
-      notificationService.error(`ເກີດຂໍ້ຜິດພາດໃນການດຶງຂໍ້ມູນຜູ້ໃຊ້: ${(error as ApiError).message}`);
+      console.error('Error in fetchUsers:', error);
+      notificationService.error(`ເກີດຂໍ້ຜິດພາດໃນການດຶງຂໍ້ມູນ: ${(error as ApiError).message || 'Unknown error'}`);
+      
+      // กำหนดค่าเริ่มต้นเพื่อให้แอปพลิเคชันยังทำงานต่อได้
+      setDrivers([]);
+      setTicketSellers([]);
+      setAdmins([]);
+      setStations([]);
     } finally {
       setLoading(false);
     }
