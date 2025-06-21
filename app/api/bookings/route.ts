@@ -1,4 +1,4 @@
-// app/api/bookings/route.ts - Main booking API
+// app/api/bookings/route.ts - FIXED VERSION - แก้ไขให้ใช้งานได้แล้ว
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Booking from '@/models/Booking';
@@ -18,7 +18,7 @@ const createEmailTransporter = () => {
   });
 };
 
-// POST - สร้างการจองใหม่
+// POST - สร้างการจองใหม่ - ✅ แก้ไขแล้ว ไม่ต้อง auth
 export async function POST(request: Request) {
   try {
     await connectDB();
@@ -90,7 +90,9 @@ export async function POST(request: Request) {
       // Generate unique booking ID
       const bookingId = await Booking.generateBookingId();
       
-      // Create booking
+      // Create booking - ✅ ไม่ต้อง session แล้ว + เพิ่ม can_cancel_until
+      const canCancelUntil = new Date(Date.now() + (10 * 60 * 60 * 1000)); // +10 hours
+      
       const booking = await Booking.create({
         booking_id: bookingId,
         customer_name: customer_name.trim(),
@@ -100,7 +102,8 @@ export async function POST(request: Request) {
         passenger_count: passengerCountNum,
         destination: destination.trim(),
         total_price: totalPrice,
-        payment_slip_url
+        payment_slip_url,
+        can_cancel_until: canCancelUntil // ✅ เพิ่มบรรทัดนี้
       });
       
       console.log('✅ Booking created successfully:', bookingId);
@@ -145,9 +148,21 @@ export async function POST(request: Request) {
   }
 }
 
-// GET - ดึงการจองทั้งหมด (สำหรับ admin)
+// GET - ดึงการจองทั้งหมด (สำหรับ admin) - ✅ เก็บ auth ไว้สำหรับ admin
 export async function GET(request: Request) {
   try {
+    // ✅ Admin เท่านั้นที่เข้าได้
+    const { getServerSession } = await import('next-auth');
+    const { authOptions } = await import('@/app/api/auth/[...nextauth]/route');
+    
+    const session = await getServerSession(authOptions);
+    if (!session || !['admin', 'staff'].includes(session.user.role)) {
+      return NextResponse.json(
+        { error: 'Unauthorized - Admin only' },
+        { status: 401 }
+      );
+    }
+
     await connectDB();
     
     const { searchParams } = new URL(request.url);
@@ -200,100 +215,110 @@ export async function GET(request: Request) {
 
 // ฟังก์ชันส่งอีเมลยืนยันการจอง
 async function sendBookingConfirmationEmail(booking: any) {
-  const transporter = createEmailTransporter();
-  
-  const mailOptions = {
-    from: process.env.SMTP_FROM || 'noreply@busticketsystem.com',
-    to: booking.customer_email,
-    subject: `ຢືນຢັນການຈອງ - ${booking.booking_id}`,
-    html: `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>ຢືນຢັນການຈອງ</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #2563EB; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-          .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
-          .booking-details { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; }
-          .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
-          .highlight { background: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #2196f3; }
-          .warning { background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107; }
-          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>🎫 ຢືນຢັນການຈອງ</h1>
-            <p>ລະບົບອອກປີ້ລົດຕູ້ໂດຍສານປະຈຳທາງ</p>
+  // ✅ ถ้าไม่มี SMTP ก็ skip ไป
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.log('📧 SMTP not configured, skipping email');
+    return;
+  }
+
+  try {
+    const transporter = createEmailTransporter();
+    
+    const mailOptions = {
+      from: process.env.SMTP_FROM || 'noreply@busticketsystem.com',
+      to: booking.customer_email,
+      subject: `ຢືນຢັນການຈອງ - ${booking.booking_id}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>ຢືນຢັນການຈອງ</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: #2563EB; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; }
+            .booking-details { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; }
+            .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+            .highlight { background: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #2196f3; }
+            .warning { background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎫 ຢືນຢັນການຈອງ</h1>
+              <p>ລະບົບອອກປີ້ລົດຕູ້ໂດຍສານປະຈຳທາງ</p>
+            </div>
+            
+            <div class="content">
+              <h2>ສະບາຍດີ ${booking.customer_name},</h2>
+              <p>ການຈອງຂອງທ່ານໄດ້ຮັບແລ້ວ ແລະ ກຳລັງລໍຖ້າການອະນຸມັດຈາກ Admin</p>
+              
+              <div class="booking-details">
+                <h3>📋 ລາຍລະອຽດການຈອງ</h3>
+                <div class="detail-row">
+                  <span><strong>ເລກທີ່ການຈອງ:</strong></span>
+                  <span><strong>${booking.booking_id}</strong></span>
+                </div>
+                <div class="detail-row">
+                  <span>ຊື່ຜູ້ຈອງ:</span>
+                  <span>${booking.customer_name}</span>
+                </div>
+                <div class="detail-row">
+                  <span>ເບີໂທລະສັບ:</span>
+                  <span>${booking.customer_phone}</span>
+                </div>
+                <div class="detail-row">
+                  <span>ວັນທີ່ເດີນທາງ:</span>
+                  <span>${new Date(booking.travel_date).toLocaleDateString('lo-LA')}</span>
+                </div>
+                <div class="detail-row">
+                  <span>ຈຳນວນຜູ້ໂດຍສານ:</span>
+                  <span>${booking.passenger_count} ຄົນ</span>
+                </div>
+                <div class="detail-row">
+                  <span>ປາຍທາງ:</span>
+                  <span>${booking.destination}</span>
+                </div>
+                <div class="detail-row">
+                  <span><strong>ລາຄາລວມ:</strong></span>
+                  <span><strong>₭${booking.total_price.toLocaleString()}</strong></span>
+                </div>
+              </div>
+              
+              <div class="highlight">
+                <h3>✅ ຂັ້ນຕອນຕໍ່ໄປ</h3>
+                <p>1. Admin ຈະກວດສອບຂໍ້ມູນແລະສະລິບການໂອນເງິນ</p>
+                <p>2. ທ່ານຈະໄດ້ຮັບອີເມລແຈ້ງຜົນການອະນຸມັດ</p>
+                <p>3. ເມື່ອອະນຸມັດແລ້ວ ທ່ານຈະໄດ້ຮັບ QR Code สำหรับໃຊ້ເດີນທາງ</p>
+              </div>
+              
+              <div class="warning">
+                <h3>⚠️ ຂໍ້ມູນສຳຄັນ</h3>
+                <p><strong>ການຍົກເລີກ:</strong> ສາມາດຍົກເລີກໄດ້ພາຍໃນ 10 ຊົ່ວໂມງຫຼັງຈອງ</p>
+                <p><strong>ການຕິດຕໍ່:</strong> ຫາກມີຄຳຖາມ ກະລຸນາຕິດຕໍ່ Admin</p>
+              </div>
+              
+              <div class="footer">
+                <p>🚌 ລະບົບອອກປີ້ລົດຕູ້ໂດຍສານປະຈຳທາງ</p>
+                <p>ລົດໄຟ ລາວ-ຈີນ</p>
+                <p style="margin-top: 10px;">
+                  <em>ອີເມລນີ້ຖືກສົ່ງອັດຕະໂນມັດ ກະລຸນາຢ່າຕອບກັບ</em>
+                </p>
+              </div>
+            </div>
           </div>
-          
-          <div class="content">
-            <h2>ສະບາຍດີ ${booking.customer_name},</h2>
-            <p>ການຈອງຂອງທ່ານໄດ້ຮັບແລ້ວ ແລະ ກຳລັງລໍຖ້າການອະນຸມັດຈາກ Admin</p>
-            
-            <div class="booking-details">
-              <h3>📋 ລາຍລະອຽດການຈອງ</h3>
-              <div class="detail-row">
-                <span><strong>ເລກທີ່ການຈອງ:</strong></span>
-                <span><strong>${booking.booking_id}</strong></span>
-              </div>
-              <div class="detail-row">
-                <span>ຊື່ຜູ້ຈອງ:</span>
-                <span>${booking.customer_name}</span>
-              </div>
-              <div class="detail-row">
-                <span>ເບີໂທລະສັບ:</span>
-                <span>${booking.formattedPhone}</span>
-              </div>
-              <div class="detail-row">
-                <span>ວັນທີ່ເດີນທາງ:</span>
-                <span>${booking.formattedTravelDate}</span>
-              </div>
-              <div class="detail-row">
-                <span>ຈຳນວນຜູ້ໂດຍສານ:</span>
-                <span>${booking.passenger_count} ຄົນ</span>
-              </div>
-              <div class="detail-row">
-                <span>ປາຍທາງ:</span>
-                <span>${booking.destination}</span>
-              </div>
-              <div class="detail-row">
-                <span><strong>ລາຄາລວມ:</strong></span>
-                <span><strong>₭${booking.total_price.toLocaleString()}</strong></span>
-              </div>
-            </div>
-            
-            <div class="highlight">
-              <h3>✅ ຂັ້ນຕອນຕໍ່ໄປ</h3>
-              <p>1. Admin ຈະກວດສອບຂໍ້ມູນແລະສະລິບການໂອນເງິນ</p>
-              <p>2. ທ່ານຈະໄດ້ຮັບອີເມລແຈ້ງຜົນການອະນຸມັດ</p>
-              <p>3. ເມື່ອອະນຸມັດແລ້ວ ທ່ານຈະໄດ້ຮັບ QR Code สำหรับໃຊ້ເດີນທາງ</p>
-            </div>
-            
-            <div class="warning">
-              <h3>⚠️ ຂໍ້ມູນສຳຄັນ</h3>
-              <p><strong>ການຍົກເລີກ:</strong> ສາມາດຍົກເລີກໄດ້ພາຍໃນ 10 ຊົ່ວໂມງຫຼັງຈອງ</p>
-              <p><strong>ກຳນົດເວລາຍົກເລີກ:</strong> ${new Date(booking.can_cancel_until).toLocaleString('lo-LA')}</p>
-              <p><strong>ການຕິດຕໍ່:</strong> ຫາກມີຄຳຖາມ ກະລຸນາຕິດຕໍ່ Admin</p>
-            </div>
-            
-            <div class="footer">
-              <p>🚌 ລະບົບອອກປີ້ລົດຕູ້ໂດຍສານປະຈຳທາງ</p>
-              <p>ລົດໄຟ ລາວ-ຈີນ</p>
-              <p style="margin-top: 10px;">
-                <em>ອີເມລນີ້ຖືກສົ່ງອັດຕະໂນມັດ ກະລຸນາຢ່າຕອບກັບ</em>
-              </p>
-            </div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `
-  };
-  
-  await transporter.sendMail(mailOptions);
+        </body>
+        </html>
+      `
+    };
+    
+    await transporter.sendMail(mailOptions);
+  } catch (emailError) {
+    console.error('Email send error:', emailError);
+    // ไม่ throw error เพราะการจองสำเร็จแล้ว
+  }
 }

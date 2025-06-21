@@ -1,4 +1,4 @@
-// components/DashboardLayout.tsx - Fixed Syntax Error
+// components/DashboardLayout.tsx - อัพเดท paths และเพิ่มเมนู Settings
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -8,20 +8,19 @@ import Link from 'next/link';
 import { 
   FiHome, 
   FiUsers, 
-  FiCreditCard, 
   FiBarChart, 
   FiLogOut, 
   FiMenu, 
   FiX,
-  FiUser,
-  FiFileText,
   FiPieChart,
-  FiLogIn
+  FiLogIn,
+  FiCalendar,
+  FiSettings  // ✅ เพิ่ม Settings icon
 } from 'react-icons/fi';
 import { TbBus } from "react-icons/tb";
+import { Ticket } from 'lucide-react';
 import GoogleAlphabetIcon from '@/components/GoogleAlphabetIcon';
 import notificationService from '@/lib/notificationService';
-import { Ticket } from 'lucide-react';
 
 interface MenuItem {
   name: string;
@@ -36,8 +35,16 @@ const menuItems: MenuItem[] = [
     name: 'ໜ້າຫຼັກ',
     href: '/dashboard',
     icon: FiHome,
-    roles: ['admin', 'station'],
+    roles: ['admin'],
     description: 'ພາບລວມຂໍ້ມູນສະຖິຕິ'
+  },
+  // ✅ อัพเดท path ให้ตรงกับที่มีอยู่
+  {
+    name: 'ຈັດການການຈອງ',
+    href: '/admin/bookings',  // ✅ ใช้ path เดิมที่มีอยู่
+    icon: FiCalendar,
+    roles: ['admin'],
+    description: 'ອະນຸມັດ/ປະຕິເສດການຈອງ'
   },
   {
     name: 'ອອກປີ້',
@@ -50,7 +57,7 @@ const menuItems: MenuItem[] = [
     name: 'ປະຫວັດປີ້',
     href: '/dashboard/tickets/history',
     icon: FiBarChart,
-    roles: ['admin', 'staff', 'station'],
+    roles: ['admin', 'staff'],
     description: 'ເບິ່ງປະຫວັດການຂາຍ'
   },
   {
@@ -60,6 +67,7 @@ const menuItems: MenuItem[] = [
     roles: ['admin', 'staff'],
     description: 'ຄົນຂັບ, ພະນັກງານ, Admin'
   },
+  
   {
     name: 'ລາຍງານ',
     href: '/dashboard/reports',
@@ -256,7 +264,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                  userRole === 'station' ? 'ສະຖານີ' : 
                  userRole === 'driver' ? 'ຄົນຂັບລົດ' : userRole}
               </p>
-              {/* แสดงสถานะ check-in เฉພาะ staff */}
+              {/* แสดงสถานะ check-in เฉพาะ staff */}
               {userRole === 'staff' && (
                 <div className="mt-1">
                   <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${
@@ -297,8 +305,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Navigation */}
         <nav className="mt-4 px-2">
           {filteredMenuItems.map((item) => {
-            // ใช้ exact matching เพื่อป้องกันปัญหา nested paths
-            const isActive = pathname === item.href;
+            // ✅ ปรับปรุงการตรวจสอบ active state
+            const isActive = pathname === item.href || 
+                            // ถ้าเป็น /dashboard/admin จะ highlight เมื่ออยู่ที่ /dashboard/admin/*
+                            (item.href === '/dashboard/admin' && pathname.startsWith('/dashboard/admin')) ||
+                            // ถ้าเป็น /admin/settings จะ highlight เมื่ออยู่ที่ /admin/settings/*
+                            (item.href === '/admin/settings' && pathname.startsWith('/admin/settings'));
             
             return (
               <Link
