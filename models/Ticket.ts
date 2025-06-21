@@ -1,4 +1,4 @@
-// models/Ticket.ts - Enhanced with Group Ticket Support
+// models/Ticket.ts - FIXED VERSION - แก้ไข auto-generate ticketNumber
 import mongoose, { Document, Model } from 'mongoose';
 
 export interface ITicketDocument extends Document {
@@ -19,6 +19,7 @@ const ticketSchema = new mongoose.Schema({
     type: String, 
     required: true, 
     unique: true 
+    // ✅ จะถูก generate ใน pre-save middleware
   },
   price: { 
     type: Number, 
@@ -55,7 +56,7 @@ const ticketSchema = new mongoose.Schema({
   pricePerPerson: {
     type: Number,
     required: true,
-    default: 4500
+    default: 45000
   }
 });
 
@@ -63,6 +64,83 @@ const ticketSchema = new mongoose.Schema({
 ticketSchema.index({ ticketType: 1 });
 ticketSchema.index({ passengerCount: 1 });
 ticketSchema.index({ soldAt: -1, ticketType: 1 });
+
+// ✅ Auto-generate ticketNumber ใน pre-save middleware
+ticketSchema.pre('save', async function(next) {
+  try {
+    // ถ้ายังไม่มี ticketNumber ให้ generate ใหม่
+    if (!this.ticketNumber) {
+      this.ticketNumber = await generateUniqueTicketNumber();
+    }
+    
+    // ตรวจสอบว่า price = pricePerPerson * passengerCount
+    const expectedPrice = this.pricePerPerson * this.passengerCount;
+    if (this.price !== expectedPrice) {
+      this.price = expectedPrice;
+    }
+    
+    // ตรวจสอบ passengerCount สำหรับ group ticket
+    if (this.ticketType === 'group' && this.passengerCount < 2) {
+      return next(new Error('Group ticket must have at least 2 passengers'));
+    }
+    
+    if (this.ticketType === 'individual' && this.passengerCount !== 1) {
+      this.passengerCount = 1;
+    }
+    
+    next();
+  } catch (error) {
+    next(error as Error);
+  }
+});
+
+// ✅ ฟังก์ชัน generate ticket number แบบ UUID (6 ตัวอักษร)
+const SAFE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generateUUIDTicketNumber(): string {
+  let result = 'T';
+  
+  for (let i = 0; i < 5; i++) {
+    const randomIndex = Math.floor(Math.random() * SAFE_CHARS.length);
+    result += SAFE_CHARS[randomIndex];
+  }
+  
+  return result;
+}
+
+async function generateUniqueTicketNumber(): Promise<string> {
+  const TicketModel = mongoose.models.Ticket;
+  if (!TicketModel) {
+    throw new Error('Ticket model not found');
+  }
+  
+  const maxAttempts = 20;
+  let attempt = 0;
+  
+  while (attempt < maxAttempts) {
+    attempt++;
+    
+    const candidateNumber = generateUUIDTicketNumber();
+    
+    console.log(`🎲 Generated ticket candidate: ${candidateNumber} (attempt ${attempt})`);
+    
+    const existingTicket = await TicketModel.findOne({ ticketNumber: candidateNumber });
+    
+    if (!existingTicket) {
+      console.log(`✅ Unique ticket number found: ${candidateNumber}`);
+      return candidateNumber;
+    }
+    
+    console.log(`⚠️ ${candidateNumber} already exists, trying again...`);
+  }
+  
+  // 🆘 Emergency fallback
+  const timestamp = Date.now().toString().slice(-2);
+  const emergency = `T${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}${timestamp}${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}`;
+  
+  console.log(`🆘 Using emergency ticket number: ${emergency}`);
+  return emergency;
+}
 
 // ✅ เพิ่ม Virtual Fields
 ticketSchema.virtual('isGroupTicket').get(function() {
@@ -164,26 +242,6 @@ ticketSchema.statics.getComprehensiveStats = async function(startDate?: Date, en
   
   return result;
 };
-
-// ✅ Pre-save middleware: ตรวจสอบความถูกต้องของข้อมูล
-ticketSchema.pre('save', function(next) {
-  // ตรวจสอบว่า price = pricePerPerson * passengerCount
-  const expectedPrice = this.pricePerPerson * this.passengerCount;
-  if (this.price !== expectedPrice) {
-    this.price = expectedPrice;
-  }
-  
-  // ตรวจสอบ passengerCount สำหรับ group ticket
-  if (this.ticketType === 'group' && this.passengerCount < 2) {
-    return next(new Error('Group ticket must have at least 2 passengers'));
-  }
-  
-  if (this.ticketType === 'individual' && this.passengerCount !== 1) {
-    this.passengerCount = 1;
-  }
-  
-  next();
-});
 
 // Ensure virtual fields are serialized
 ticketSchema.set('toJSON', { virtuals: true });

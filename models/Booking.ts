@@ -1,4 +1,4 @@
-// models/Booking.ts
+// models/Booking.ts - FIXED VERSION - แก้ไข duplicate index และ schema issues
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface IBooking extends Document {
@@ -8,23 +8,23 @@ export interface IBooking extends Document {
   customer_email: string;
   travel_date: Date;
   passenger_count: number;
-  destination: string; // เส้นทางที่ลูกค้าระบุ
+  destination: string;
   total_price: number;
-  payment_slip_url: string; // Cloudinary URL
+  payment_slip_url: string;
   payment_status: 'pending' | 'approved' | 'rejected';
   booking_status: 'active' | 'cancelled';
   created_at: Date;
   updated_at: Date;
-  can_cancel_until: Date; // คำนวณจาก created_at + 10 ชั่วโมง
-  generated_ticket_id?: mongoose.Schema.Types.ObjectId; // เมื่อ admin อนุมัติจะสร้าง ticket
-  notes?: string; // หมายเหตุจาก admin
+  can_cancel_until: Date;
+  generated_ticket_id?: mongoose.Schema.Types.ObjectId;
+  notes?: string;
 }
 
 const bookingSchema = new Schema({
   booking_id: { 
     type: String, 
     required: true, 
-    unique: true 
+    unique: true  // ✅ ใช้ unique: true แทน schema.index()
   },
   customer_name: { 
     type: String, 
@@ -70,7 +70,7 @@ const bookingSchema = new Schema({
     type: Number, 
     required: true,
     min: 1,
-    max: 10 // รองรับ group booking สูงสุด 10 คน
+    max: 10
   },
   destination: { 
     type: String, 
@@ -81,15 +81,8 @@ const bookingSchema = new Schema({
   total_price: { 
     type: Number, 
     required: true,
-    min: 0,
-    validate: {
-      validator: function(v: number) {
-        // ตรวจสอบว่าราคารวมถูกต้อง (45000 * passenger_count)
-        const expectedPrice = 45000 * this.passenger_count;
-        return v === expectedPrice;
-      },
-      message: 'Total price does not match passenger count'
-    }
+    min: 0
+    // ✅ ลบ validation ที่ใช้ this.passenger_count ออก เพราะทำให้ error
   },
   payment_slip_url: { 
     type: String, 
@@ -106,8 +99,8 @@ const bookingSchema = new Schema({
     default: 'active'
   },
   can_cancel_until: { 
-    type: Date, 
-    required: true 
+    type: Date
+    // ✅ ลบ required: true ออก เพราะจะ set ใน pre-save
   },
   generated_ticket_id: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -124,8 +117,8 @@ const bookingSchema = new Schema({
   } 
 });
 
-// Indexes for efficient queries
-bookingSchema.index({ booking_id: 1 }, { unique: true });
+// ✅ ลบ duplicate indexes ออกเพราะ unique: true จะสร้างให้อัตโนมัติ
+// เก็บไว้เฉพาะ index ที่จำเป็น
 bookingSchema.index({ customer_phone: 1 });
 bookingSchema.index({ customer_email: 1 });
 bookingSchema.index({ travel_date: 1 });
@@ -133,27 +126,39 @@ bookingSchema.index({ payment_status: 1 });
 bookingSchema.index({ booking_status: 1 });
 bookingSchema.index({ created_at: -1 });
 
-// Pre-save middleware: Auto-generate booking_id and can_cancel_until
-bookingSchema.pre('save', function(next) {
-  if (this.isNew) {
-    // Generate booking ID: BK-YYMMDD-XXX
-    const date = new Date();
-    const year = date.getFullYear().toString().slice(-2);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    
-    // Generate 3-digit random number
-    const randomNum = Math.floor(Math.random() * 900) + 100;
-    this.booking_id = `BK-${year}${month}${day}-${randomNum}`;
-    
-    // Set cancellation deadline (10 hours from creation)
-    this.can_cancel_until = new Date(this.created_at.getTime() + (10 * 60 * 60 * 1000));
+// ✅ แก้ไข Pre-save middleware ให้ทำงานได้ถูกต้อง
+bookingSchema.pre('save', async function(next) {
+  try {
+    if (this.isNew) {
+      // ✅ ตรวจสอบราคาก่อน save
+      const expectedPrice = 45000 * this.passenger_count;
+      if (this.total_price !== expectedPrice) {
+        this.total_price = expectedPrice;
+      }
+      
+      // Generate booking ID ถ้ายังไม่มี
+      if (!this.booking_id) {
+        this.booking_id = await generateUniqueBookingId();
+      }
+      
+      // Set cancellation deadline (10 hours from creation)
+      if (!this.can_cancel_until) {
+        this.can_cancel_until = new Date(Date.now() + (10 * 60 * 60 * 1000));
+      }
+    }
+    next();
+  } catch (error) {
+    next(error as Error);
   }
-  next();
 });
 
-// Static method: Generate unique booking ID
-bookingSchema.statics.generateBookingId = async function(): Promise<string> {
+// ✅ ย้าย generateUniqueBookingId ออกมาเป็น function แยก
+async function generateUniqueBookingId(): Promise<string> {
+  const BookingModel = mongoose.models.Booking;
+  if (!BookingModel) {
+    throw new Error('Booking model not found');
+  }
+  
   const date = new Date();
   const year = date.getFullYear().toString().slice(-2);
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -166,7 +171,7 @@ bookingSchema.statics.generateBookingId = async function(): Promise<string> {
     const randomNum = Math.floor(Math.random() * 900) + 100;
     const bookingId = `BK-${year}${month}${day}-${randomNum}`;
     
-    const existing = await this.findOne({ booking_id: bookingId });
+    const existing = await BookingModel.findOne({ booking_id: bookingId });
     if (!existing) {
       return bookingId;
     }
@@ -175,6 +180,11 @@ bookingSchema.statics.generateBookingId = async function(): Promise<string> {
   }
   
   throw new Error('Unable to generate unique booking ID');
+}
+
+// Static method: Generate unique booking ID
+bookingSchema.statics.generateBookingId = async function(): Promise<string> {
+  return await generateUniqueBookingId();
 };
 
 // Static method: Find bookings by phone number
@@ -186,7 +196,7 @@ bookingSchema.statics.findByPhone = function(phone: string) {
   }).sort({ created_at: -1 });
 };
 
-// Static method: Check if booking can be cancelled
+// Instance method: Check if booking can be cancelled
 bookingSchema.methods.canBeCancelled = function(): boolean {
   const now = new Date();
   return this.booking_status === 'active' && 
@@ -251,7 +261,7 @@ bookingSchema.statics.getBookingStats = async function() {
   };
 };
 
-// Virtual field: Format phone number for display
+// Virtual fields
 bookingSchema.virtual('formattedPhone').get(function() {
   if (this.customer_phone && this.customer_phone.length === 10) {
     return `${this.customer_phone.slice(0, 3)}-${this.customer_phone.slice(3, 6)}-${this.customer_phone.slice(6)}`;
@@ -259,12 +269,10 @@ bookingSchema.virtual('formattedPhone').get(function() {
   return this.customer_phone;
 });
 
-// Virtual field: Check if cancellation is still possible
 bookingSchema.virtual('canCancel').get(function() {
   return this.canBeCancelled();
 });
 
-// Virtual field: Time left for cancellation
 bookingSchema.virtual('cancellationTimeLeft').get(function() {
   const now = new Date();
   if (now > this.can_cancel_until) {
@@ -273,7 +281,6 @@ bookingSchema.virtual('cancellationTimeLeft').get(function() {
   return Math.max(0, this.can_cancel_until.getTime() - now.getTime());
 });
 
-// Virtual field: Format travel date
 bookingSchema.virtual('formattedTravelDate').get(function() {
   return this.travel_date.toLocaleDateString('lo-LA');
 });
@@ -282,7 +289,7 @@ bookingSchema.virtual('formattedTravelDate').get(function() {
 bookingSchema.set('toJSON', { virtuals: true });
 bookingSchema.set('toObject', { virtuals: true });
 
-// Handle the case where this model might be compiled multiple times
+// ✅ ป้องกันการ compile ซ้ำ
 const Booking: Model<IBooking> = mongoose.models.Booking || mongoose.model<IBooking>('Booking', bookingSchema);
 
 export default Booking;

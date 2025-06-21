@@ -1,4 +1,4 @@
-// app/api/bookings/route.ts - FIXED VERSION - แก้ไขให้ใช้งานได้แล้ว
+// app/api/bookings/route.ts - FIXED VERSION - แก้ไขการ validation และ error handling
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Booking from '@/models/Booking';
@@ -7,6 +7,12 @@ import nodemailer from 'nodemailer';
 
 // สร้าง email transporter
 const createEmailTransporter = () => {
+  // ✅ ถ้าไม่มี SMTP config ให้ return null
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.log('📧 SMTP not configured, email will be skipped');
+    return null;
+  }
+  
   return nodemailer.createTransporter({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT || '587'),
@@ -18,9 +24,11 @@ const createEmailTransporter = () => {
   });
 };
 
-// POST - สร้างการจองใหม่ - ✅ แก้ไขแล้ว ไม่ต้อง auth
+// POST - สร้างการจองใหม่ - ✅ แก้ไขแล้ว
 export async function POST(request: Request) {
   try {
+    console.log('🎯 Starting booking creation...');
+    
     await connectDB();
     
     const body = await request.json();
@@ -40,60 +48,80 @@ export async function POST(request: Request) {
       customer_email,
       travel_date,
       passenger_count,
-      destination
+      destination,
+      hasPaymentSlip: !!payment_slip_url
     });
     
-    // Validate required fields
+    // ✅ Validate required fields
     if (!customer_name || !customer_phone || !customer_email || !travel_date || 
         !passenger_count || !destination || !payment_slip_url) {
+      console.error('❌ Missing required fields');
       return NextResponse.json(
         { error: 'ກະລຸນາໃສ່ຂໍ້ມູນໃຫ້ຄົບຖ້ວນ' },
         { status: 400 }
       );
     }
     
-    // Clean phone number
+    // ✅ Clean and validate phone number
     const cleanPhone = customer_phone.replace(/\D/g, '');
+    console.log('📞 Cleaned phone:', cleanPhone);
+    
     if (cleanPhone.length !== 10) {
+      console.error('❌ Invalid phone length:', cleanPhone.length);
       return NextResponse.json(
         { error: 'ເບີໂທລະສັບຕ້ອງເປັນ 10 ຫຼັກ' },
         { status: 400 }
       );
     }
     
-    // Validate passenger count
+    // ✅ Validate passenger count
     const passengerCountNum = parseInt(passenger_count);
-    if (passengerCountNum < 1 || passengerCountNum > 10) {
+    if (isNaN(passengerCountNum) || passengerCountNum < 1 || passengerCountNum > 10) {
+      console.error('❌ Invalid passenger count:', passengerCountNum);
       return NextResponse.json(
         { error: 'ຈຳນວນຜູ້ໂດຍສານຕ້ອງຢູ່ລະຫວ່າງ 1-10 ຄົນ' },
         { status: 400 }
       );
     }
     
-    // Validate travel date (must be within 5 days)
+    // ✅ Validate travel date
     const travelDateObj = new Date(travel_date);
     const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset to start of day
     const maxDate = new Date(today.getTime() + (5 * 24 * 60 * 60 * 1000));
     
+    console.log('📅 Date validation:', {
+      travelDate: travelDateObj,
+      today: today,
+      maxDate: maxDate,
+      isValid: travelDateObj >= today && travelDateObj <= maxDate
+    });
+    
     if (travelDateObj < today || travelDateObj > maxDate) {
+      console.error('❌ Invalid travel date');
       return NextResponse.json(
         { error: 'ວັນທີ່ເດີນທາງຕ້ອງຢູ່ໃນໄລຍະ 5 ວັນຂ້າງໜ້າ' },
         { status: 400 }
       );
     }
     
-    // Calculate total price
+    // ✅ Calculate total price
     const pricePerPerson = 45000; // LAK
     const totalPrice = pricePerPerson * passengerCountNum;
     
+    console.log('💰 Price calculation:', {
+      pricePerPerson,
+      passengerCount: passengerCountNum,
+      totalPrice
+    });
+    
     try {
-      // Generate unique booking ID
+      // ✅ Generate unique booking ID
       const bookingId = await Booking.generateBookingId();
+      console.log('🆔 Generated booking ID:', bookingId);
       
-      // Create booking - ✅ ไม่ต้อง session แล้ว + เพิ่ม can_cancel_until
-      const canCancelUntil = new Date(Date.now() + (10 * 60 * 60 * 1000)); // +10 hours
-      
-      const booking = await Booking.create({
+      // ✅ สร้าง booking - ไม่ใช้ session และแยก validation ออกมา
+      const bookingData = {
         booking_id: bookingId,
         customer_name: customer_name.trim(),
         customer_phone: cleanPhone,
@@ -102,46 +130,77 @@ export async function POST(request: Request) {
         passenger_count: passengerCountNum,
         destination: destination.trim(),
         total_price: totalPrice,
-        payment_slip_url,
-        can_cancel_until: canCancelUntil // ✅ เพิ่มบรรทัดนี้
+        payment_slip_url: payment_slip_url,
+        can_cancel_until: new Date(Date.now() + (10 * 60 * 60 * 1000)) // +10 hours
+      };
+      
+      console.log('💾 Creating booking with data:', {
+        ...bookingData,
+        payment_slip_url: payment_slip_url ? 'PROVIDED' : 'MISSING'
       });
       
-      console.log('✅ Booking created successfully:', bookingId);
+      const booking = await Booking.create(bookingData);
+      console.log('✅ Booking created successfully:', booking.booking_id);
       
-      // Send confirmation email
+      // ✅ Send confirmation email (optional - ไม่ให้ error ถ้าส่งไม่ได้)
       try {
         await sendBookingConfirmationEmail(booking);
-        console.log('📧 Confirmation email sent to:', customer_email);
+        console.log('📧 Confirmation email sent successfully');
       } catch (emailError) {
-        console.error('❌ Failed to send confirmation email:', emailError);
-        // Continue anyway - booking is created
+        console.warn('⚠️ Failed to send confirmation email (non-critical):', emailError);
+        // Continue anyway - booking is created successfully
       }
       
+      // ✅ Return success response
       return NextResponse.json({
         success: true,
-        booking_id: bookingId,
-        total_price: totalPrice,
+        booking_id: booking.booking_id,
+        total_price: booking.total_price,
         can_cancel_until: booking.can_cancel_until,
         message: 'ການຈອງສຳເລັດແລ້ວ! ກະລຸນາລໍຖ້າການອະນຸມັດຈາກ Admin'
       });
       
     } catch (createError: any) {
+      console.error('💥 Booking creation error:', createError);
+      
+      // ✅ Handle specific MongoDB errors
       if (createError.code === 11000) {
-        // Duplicate booking ID, try again
+        console.error('❌ Duplicate key error:', createError.keyPattern);
         return NextResponse.json(
           { error: 'ເກີດຂໍ້ຜິດພາດໃນການສ້າງເລກທີ່ການຈອງ ກະລຸນາລອງໃໝ່' },
           { status: 500 }
         );
       }
+      
+      // ✅ Handle validation errors
+      if (createError.name === 'ValidationError') {
+        console.error('❌ Validation error:', createError.message);
+        const errorMessages = Object.values(createError.errors).map((err: any) => err.message);
+        return NextResponse.json(
+          { error: 'ຂໍ້ມູນບໍ່ຖືກຕ້ອງ: ' + errorMessages.join(', ') },
+          { status: 400 }
+        );
+      }
+      
       throw createError;
     }
     
   } catch (error) {
-    console.error('💥 Booking creation error:', error);
+    console.error('💥 Booking creation error (outer catch):', error);
+    
+    // ✅ Return detailed error for debugging
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : '';
+    
+    console.error('Error details:', {
+      message: errorMessage,
+      stack: errorStack
+    });
+    
     return NextResponse.json(
       { 
         error: 'ເກີດຂໍ້ຜິດພາດໃນການສ້າງການຈອງ',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
       },
       { status: 500 }
     );
@@ -213,17 +272,17 @@ export async function GET(request: Request) {
   }
 }
 
-// ฟังก์ชันส่งอีเมลยืนยันการจอง
+// ✅ ฟังก์ชันส่งอีเมลยืนยันการจอง - แก้ไขให้ handle error ได้ดี
 async function sendBookingConfirmationEmail(booking: any) {
-  // ✅ ถ้าไม่มี SMTP ก็ skip ไป
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.log('📧 SMTP not configured, skipping email');
-    return;
-  }
-
   try {
     const transporter = createEmailTransporter();
     
+    // ✅ ถ้าไม่มี transporter ให้ skip
+    if (!transporter) {
+      console.log('📧 Email transporter not available, skipping email');
+      return;
+    }
+
     const mailOptions = {
       from: process.env.SMTP_FROM || 'noreply@busticketsystem.com',
       to: booking.customer_email,
@@ -317,8 +376,11 @@ async function sendBookingConfirmationEmail(booking: any) {
     };
     
     await transporter.sendMail(mailOptions);
+    console.log('📧 Email sent successfully to:', booking.customer_email);
+    
   } catch (emailError) {
-    console.error('Email send error:', emailError);
-    // ไม่ throw error เพราะการจองสำเร็จแล้ว
+    console.error('📧 Email send error:', emailError);
+    // ✅ ไม่ throw error เพราะการจองสำเร็จแล้ว
+    throw new Error('Failed to send email: ' + (emailError as Error).message);
   }
 }
