@@ -1,4 +1,4 @@
-// app/booking/page.tsx - หน้าจองตั๋วสำหรับลูกค้า (Public)
+// app/booking/page.tsx - Next.js 15 Improved Booking Page
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -6,47 +6,91 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import toast from 'react-hot-toast';
 import { 
-  FiPhone, 
-  FiMail, 
-  FiUser, 
   FiCalendar, 
+  FiMapPin, 
   FiUsers, 
-  FiMapPin,
+  FiUser, 
+  FiPhone, 
+  FiMail,
   FiUpload,
   FiCheck,
-  FiClock
+  FiArrowRight,
+  FiArrowLeft,
+  FiCreditCard
 } from 'react-icons/fi';
 
-interface BookingFormData {
+interface BookingData {
+  // Section 1: Trip Details
+  travel_date: string;
+  destination: string;
+  passenger_count: number;
+  
+  // Section 2: Customer Info
   customer_name: string;
   customer_phone: string;
   customer_email: string;
-  travel_date: string;
-  passenger_count: number;
-  destination: string;
+  
+  // Section 3: Payment
   payment_slip_url: string;
+  total_price: number;
 }
 
-export default function BookingPage() {
+interface StepIndicatorProps {
+  step: number;
+  currentStep: number;
+  title: string;
+  description: string;
+}
+
+const StepIndicator: React.FC<StepIndicatorProps> = ({ step, currentStep, title, description }) => {
+  const getStepStatus = () => {
+    if (step < currentStep) return 'completed';
+    if (step === currentStep) return 'active';
+    return 'pending';
+  };
+
+  const status = getStepStatus();
+
+  return (
+    <div className="flex items-center">
+      <div className={`
+        w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm
+        ${status === 'completed' ? 'bg-green-500 text-white' : ''}
+        ${status === 'active' ? 'bg-blue-500 text-white' : ''}
+        ${status === 'pending' ? 'bg-gray-200 text-gray-500' : ''}
+      `}>
+        {status === 'completed' ? <FiCheck /> : step}
+      </div>
+      <div className="ml-3 hidden md:block">
+        <p className={`text-sm font-medium ${status === 'active' ? 'text-blue-600' : 'text-gray-500'}`}>
+          {title}
+        </p>
+        <p className="text-xs text-gray-400">{description}</p>
+      </div>
+    </div>
+  );
+};
+
+export default function ImprovedBookingPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState<BookingFormData>({
-    customer_name: '',
-    customer_phone: '',
-    customer_email: '',
-    travel_date: '',
-    passenger_count: 1,
-    destination: '',
-    payment_slip_url: ''
-  });
-  
+  const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [uploadingSlip, setUploadingSlip] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [totalPrice, setTotalPrice] = useState(45000);
   const [minDate, setMinDate] = useState('');
   const [maxDate, setMaxDate] = useState('');
 
-  const PRICE_PER_PERSON = 45000; // LAK
+  const [formData, setFormData] = useState<BookingData>({
+    travel_date: '',
+    destination: '',
+    passenger_count: 1,
+    customer_name: '',
+    customer_phone: '',
+    customer_email: '',
+    payment_slip_url: '',
+    total_price: 45000
+  });
+
+  const PRICE_PER_PERSON = 45000;
 
   // Set date limits (today to 5 days ahead)
   useEffect(() => {
@@ -59,10 +103,13 @@ export default function BookingPage() {
 
   // Calculate total price when passenger count changes
   useEffect(() => {
-    setTotalPrice(PRICE_PER_PERSON * formData.passenger_count);
+    setFormData(prev => ({
+      ...prev,
+      total_price: PRICE_PER_PERSON * prev.passenger_count
+    }));
   }, [formData.passenger_count]);
 
-  // Handle form input changes
+  // Handle input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -71,11 +118,38 @@ export default function BookingPage() {
     }));
   };
 
+  // Validate current step
+  const validateStep = (step: number): boolean => {
+    switch (step) {
+      case 1:
+        return !!(formData.travel_date && formData.destination && formData.passenger_count);
+      case 2:
+        return !!(formData.customer_name && formData.customer_phone && formData.customer_email);
+      case 3:
+        return !!formData.payment_slip_url;
+      default:
+        return false;
+    }
+  };
+
+  // Handle next step
+  const handleNextStep = () => {
+    if (validateStep(currentStep)) {
+      setCurrentStep(prev => Math.min(prev + 1, 3));
+    } else {
+      toast.error('ກະລຸນາໃສ່ຂໍ້ມູນໃຫ້ຄົບຖ້ວນ');
+    }
+  };
+
+  // Handle previous step
+  const handlePreviousStep = () => {
+    setCurrentStep(prev => Math.max(prev - 1, 1));
+  };
+
   // Handle slip upload
   const handleSlipUpload = async (file: File) => {
     if (!file) return;
 
-    // Validate file
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
       toast.error('ປະເພດໄຟລ໌ບໍ່ຖືກຕ້ອງ. ອະນຸຍາດເຉພາະ JPG, PNG, WebP');
@@ -117,16 +191,9 @@ export default function BookingPage() {
   };
 
   // Handle form submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!agreedToTerms) {
-      toast.error('ກະລຸນາຍອມຮັບເງື່ອນໄຂການໃຊ້ງານ');
-      return;
-    }
-
-    if (!formData.payment_slip_url) {
-      toast.error('ກະລຸນາອັບໂຫຼດສະລິບການໂອນເງິນ');
+  const handleSubmit = async () => {
+    if (!validateStep(3)) {
+      toast.error('ກະລຸນາໃສ່ຂໍ້ມູນໃຫ້ຄົບຖ້ວນ');
       return;
     }
 
@@ -143,7 +210,6 @@ export default function BookingPage() {
 
       if (result.success) {
         toast.success('ຈອງສຳເລັດ! ກະລຸນາລໍຖ້າການອະນຸມັດ');
-        // Redirect to status page with booking ID
         router.push(`/booking/success?id=${result.booking_id}`);
       } else {
         toast.error(result.error || 'ເກີດຂໍ້ຜິດພາດໃນການຈອງ');
@@ -159,23 +225,22 @@ export default function BookingPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow-sm sticky top-0 z-50">
+      <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-lg flex items-center justify-center">
+              <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
                   <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"/>
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">BusBooking</h1>
+                <h1 className="text-xl font-bold text-gray-900">ຈອງປີ້ລົດຕູ້</h1>
                 <p className="text-xs text-gray-500">ລົດໄຟ ລາວ-ຈີນ</p>
               </div>
             </div>
             <nav className="hidden md:flex space-x-6">
-              <a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">ໜ້າຫຼັກ</a>
               <a href="/booking/status" className="text-gray-600 hover:text-gray-900 transition-colors">ເຊັກສະຖານະ</a>
               <a href="#contact" className="text-gray-600 hover:text-gray-900 transition-colors">ຕິດຕໍ່</a>
             </nav>
@@ -183,82 +248,173 @@ export default function BookingPage() {
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="bg-gradient-to-br from-purple-600 via-indigo-600 to-blue-600 py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-6">
-            ຈອງປີ້ລົດຕູ້ໂດຍສານ
-          </h1>
-          <p className="text-xl text-purple-100 mb-8 max-w-2xl mx-auto">
-            ສະດວກ ປອດໄພ ແລະ ລາຄາສົມເຫດສົມຜົນ
-            <br/>ຈອງລ່ວງໜ້າໄດ້ເຖິງ 5 ວັນ
-          </p>
-          <div className="flex justify-center flex-wrap gap-6 text-purple-100">
-            <div className="flex items-center">
-              <FiCheck className="w-5 h-5 mr-2" />
-              ຈອງງ່າຍ
-            </div>
-            <div className="flex items-center">
-              <FiClock className="w-5 h-5 mr-2" />
-              ຍົກເລີກໄດ້
-            </div>
-            <div className="flex items-center">
-              <FiCheck className="w-5 h-5 mr-2" />
-              ຄຸນນະພາບສູງ
-            </div>
+      {/* Progress Steps */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex justify-between">
+            <StepIndicator 
+              step={1} 
+              currentStep={currentStep} 
+              title="ເລືອກວັນທີ່ແລະປາຍທາງ" 
+              description="ວັນທີ່, ສະຖານທີ່, ຈຳນວນຄົນ" 
+            />
+            <div className="flex-1 mx-4 border-t-2 border-gray-200 mt-5"></div>
+            <StepIndicator 
+              step={2} 
+              currentStep={currentStep} 
+              title="ຂໍ້ມູນຜູ້ຈອງ" 
+              description="ຊື່, ອີເມລ, ເບີໂທ" 
+            />
+            <div className="flex-1 mx-4 border-t-2 border-gray-200 mt-5"></div>
+            <StepIndicator 
+              step={3} 
+              currentStep={currentStep} 
+              title="ການຊຳລະເງິນ" 
+              description="ສະລິບ, ສະຫຼຸບຍອດ" 
+            />
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* Main Booking Form */}
-      <section className="py-16 -mt-10 relative z-10">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-white rounded-2xl shadow-xl p-8">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">ຈອງປີ້ຂອງທ່ານ</h2>
-              <p className="text-gray-600">ໃສ່ຂໍ້ມູນເພື່ອຈອງປີ້ລ່ວງໜ້າ</p>
-            </div>
+      {/* Main Content */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+          {/* Section 1: Trip Details */}
+          {currentStep === 1 && (
+            <div className="p-8">
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">ເລືອກວັນທີ່ແລະປາຍທາງ</h2>
+                <p className="text-gray-600">ເລືອກວັນທີ່ທີ່ທ່ານຕ້ອງການເດີນທາງ ແລະ ບອກພວກເຮົາວ່າທ່ານຢາກໄປໃສ</p>
+              </div>
 
-            <form onSubmit={handleSubmit} className="space-y-8">
-              {/* Customer Information */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">ຂໍ້ມູນຜູ້ຈອງ</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <FiUser className="inline w-4 h-4 mr-1" />
-                      ຊື່ຜູ້ຈອງ *
-                    </label>
-                    <input
-                      type="text"
-                      name="customer_name"
-                      value={formData.customer_name}
-                      onChange={handleInputChange}
-                      placeholder="ໃສ່ຊື່ຂອງທ່ານ"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <FiPhone className="inline w-4 h-4 mr-1" />
-                      ເບີໂທລະສັບ *
-                    </label>
-                    <input
-                      type="tel"
-                      name="customer_phone"
-                      value={formData.customer_phone}
-                      onChange={handleInputChange}
-                      placeholder="020 XXXX XXXX"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                      required
-                    />
-                  </div>
+              <div className="space-y-6">
+                {/* Travel Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FiCalendar className="inline w-4 h-4 mr-2 text-blue-500" />
+                    ວັນທີ່ເດີນທາງ *
+                  </label>
+                  <input
+                    type="date"
+                    name="travel_date"
+                    value={formData.travel_date}
+                    onChange={handleInputChange}
+                    min={minDate}
+                    max={maxDate}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-lg"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">ຈອງລ່ວງໜ້າໄດ້ເຖິງ 5 ວັນ</p>
                 </div>
 
-                <div className="mt-6">
+                {/* Destination */}
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <FiMail className="inline w-4 h-4 mr-1" />
+                    <FiMapPin className="inline w-4 h-4 mr-2 text-red-500" />
+                    ປາຍທາງ / ສະຖານທີ່ທີ່ຕ້ອງການໄປ *
+                  </label>
+                  <textarea
+                    name="destination"
+                    value={formData.destination}
+                    onChange={handleInputChange}
+                    rows={4}
+                    placeholder="ບອກພວກເຮົາວ່າທ່ານຕ້ອງການໄປໃສ ເຊັ່ນ: ເຮືອນ, ຫ້າງ, ໂຮງຮຽນ, ຫຼື ບ່ອນສະເພາະ..."
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-none"
+                    required
+                  />
+                </div>
+
+                {/* Passenger Count */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FiUsers className="inline w-4 h-4 mr-2 text-green-500" />
+                    ຈຳນວນຜູ້ໂດຍສານ *
+                  </label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, passenger_count: num }))}
+                        className={`px-4 py-3 rounded-xl border-2 transition-all font-medium ${
+                          formData.passenger_count === num
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-sm text-gray-600 mt-2">
+                    ລາຄາ: ₭{PRICE_PER_PERSON.toLocaleString()} × {formData.passenger_count} ຄົນ = 
+                    <span className="font-bold text-blue-600"> ₭{formData.total_price.toLocaleString()}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Next Button */}
+              <div className="mt-8 flex justify-end">
+                <button
+                  onClick={handleNextStep}
+                  disabled={!validateStep(1)}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center"
+                >
+                  ຕໍ່ໄປ
+                  <FiArrowRight className="ml-2" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Section 2: Customer Information */}
+          {currentStep === 2 && (
+            <div className="p-8">
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">ຂໍ້ມູນຜູ້ຈອງ</h2>
+                <p className="text-gray-600">ໃສ່ຂໍ້ມູນຂອງທ່ານເພື່ອຢືນຢັນການຈອງ</p>
+              </div>
+
+              <div className="space-y-6">
+                {/* Customer Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FiUser className="inline w-4 h-4 mr-2 text-purple-500" />
+                    ຊື່ຜູ້ຈອງ *
+                  </label>
+                  <input
+                    type="text"
+                    name="customer_name"
+                    value={formData.customer_name}
+                    onChange={handleInputChange}
+                    placeholder="ໃສ່ຊື່ເຕັມຂອງທ່ານ"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-lg"
+                    required
+                  />
+                </div>
+
+                {/* Phone Number */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FiPhone className="inline w-4 h-4 mr-2 text-green-500" />
+                    ເບີໂທລະສັບ *
+                  </label>
+                  <input
+                    type="tel"
+                    name="customer_phone"
+                    value={formData.customer_phone}
+                    onChange={handleInputChange}
+                    placeholder="020 XXXX XXXX"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-lg"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">ເບີໂທລະສັບຕ້ອງເປັນ 10 ຫຼັກ</p>
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FiMail className="inline w-4 h-4 mr-2 text-blue-500" />
                     ອີເມລ *
                   </label>
                   <input
@@ -267,117 +423,92 @@ export default function BookingPage() {
                     value={formData.customer_email}
                     onChange={handleInputChange}
                     placeholder="example@email.com"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-lg"
                     required
                   />
+                  <p className="text-xs text-gray-500 mt-1">ສຳລັບສົ່ງການຢືນຢັນແລະ QR Code</p>
                 </div>
               </div>
 
-              {/* Travel Details */}
-              <div className="border-t border-gray-200 pt-8">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">ຂໍ້ມູນການເດີນທາງ</h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <FiCalendar className="inline w-4 h-4 mr-1" />
-                      ວັນທີ່ເດີນທາງ *
-                    </label>
-                    <input
-                      type="date"
-                      name="travel_date"
-                      value={formData.travel_date}
-                      onChange={handleInputChange}
-                      min={minDate}
-                      max={maxDate}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                      required
-                    />
-                    <p className="text-xs text-gray-500 mt-1">ຈອງລ່ວງໜ້າໄດ້ເຖິງ 5 ວັນ</p>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <FiUsers className="inline w-4 h-4 mr-1" />
-                      ຈຳນວນຜູ້ໂດຍສານ *
-                    </label>
-                    <select 
-                      name="passenger_count"
-                      value={formData.passenger_count}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-                    >
-                      {[1,2,3,4,5,6,7,8,9,10].map(num => (
-                        <option key={num} value={num}>{num} ຄົນ</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+              {/* Navigation Buttons */}
+              <div className="mt-8 flex justify-between">
+                <button
+                  onClick={handlePreviousStep}
+                  className="px-8 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-medium flex items-center"
+                >
+                  <FiArrowLeft className="mr-2" />
+                  ກັບຄືນ
+                </button>
+                <button
+                  onClick={handleNextStep}
+                  disabled={!validateStep(2)}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center"
+                >
+                  ຕໍ່ໄປ
+                  <FiArrowRight className="ml-2" />
+                </button>
+              </div>
+            </div>
+          )}
 
-                <div className="mt-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <FiMapPin className="inline w-4 h-4 mr-1" />
-                    ປາຍທາງ / ສະຖານທີ່ທີ່ຕ້ອງການໄປ *
-                  </label>
-                  <textarea
-                    name="destination"
-                    value={formData.destination}
-                    onChange={handleInputChange}
-                    rows={3}
-                    placeholder="ບອກພວກເຮົາວ່າທ່ານຕ້ອງການໄປໃສ ເຊັ່ນ: ເຮືອນ, ຫ້າງ, ໂຮງຮຽນ, ຫຼື ບ່ອນສະເພາະ"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all resize-none"
-                    required
-                  />
-                </div>
+          {/* Section 3: Payment & Summary */}
+          {currentStep === 3 && (
+            <div className="p-8">
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">ສະຫຼຸບການຈອງ ແລະ ການຊຳລະເງິນ</h2>
+                <p className="text-gray-600">ກວດສອບຂໍ້ມູນແລະອັບໂຫຼດສະລິບການໂອນເງິນ</p>
               </div>
 
-              {/* Price Summary */}
-              <div className="bg-gray-50 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">ສະຫຼຸບລາຄາ</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">ລາຄາຕໍ່ຄົນ</span>
-                    <span className="font-medium">₭{PRICE_PER_PERSON.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">ຈຳນວນຜູ້ໂດຍສານ</span>
-                    <span className="font-medium">{formData.passenger_count} ຄົນ</span>
-                  </div>
-                  <div className="border-t border-gray-200 pt-3 flex justify-between">
-                    <span className="text-lg font-semibold text-gray-900">ລາຄາລວມ</span>
-                    <span className="text-lg font-bold text-purple-600">₭{totalPrice.toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Upload */}
-              <div className="border-t border-gray-200 pt-8">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">ການຊຳລະເງິນ</h3>
-                
-                {/* Bank Info */}
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-6">
-                  <h4 className="font-semibold text-blue-900 mb-3">ຂໍ້ມູນບັນຊີ</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-blue-700 font-medium">ບັນຊີ BCEL:</span>
-                      <p className="text-blue-900 font-mono text-lg">1234-567-890-123</p>
-                    </div>
-                    <div>
-                      <span className="text-blue-700 font-medium">ຊື່ບັນຊີ:</span>
-                      <p className="text-blue-900">ລົດຕູ້ໂດຍສານ ລາວ-ຈີນ</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Upload Area */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Summary */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <FiUpload className="inline w-4 h-4 mr-1" />
-                    ອັບໂຫຼດສະລິບການໂອນເງິນ *
-                  </label>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">ສະຫຼຸບການຈອງ</h3>
+                  
+                  <div className="bg-gray-50 rounded-xl p-6 space-y-4">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">ວັນທີ່ເດີນທາງ:</span>
+                      <span className="font-medium">{new Date(formData.travel_date).toLocaleDateString('lo-LA')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">ຈຳນວນຜູ້ໂດຍສານ:</span>
+                      <span className="font-medium">{formData.passenger_count} ຄົນ</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">ຜູ້ຈອງ:</span>
+                      <span className="font-medium">{formData.customer_name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">ເບີໂທ:</span>
+                      <span className="font-medium">{formData.customer_phone}</span>
+                    </div>
+                    <div className="border-t border-gray-200 pt-4">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">ລາຄາຕໍ່ຄົນ:</span>
+                        <span className="font-medium">₭{PRICE_PER_PERSON.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-xl font-bold text-blue-600 mt-2">
+                        <span>ລາຄາລວມ:</span>
+                        <span>₭{formData.total_price.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                    <h4 className="font-medium text-blue-900 mb-2">ຂໍ້ມູນບັນຊີສຳລັບໂອນເງິນ</h4>
+                    <div className="text-sm text-blue-800">
+                      <p><strong>ທະນາຄານ:</strong> BCEL</p>
+                      <p><strong>ເລກບັນຊີ:</strong> 1234-567-890-123</p>
+                      <p><strong>ຊື່ບັນຊີ:</strong> ລົດຕູ້ໂດຍສານ ລາວ-ຈີນ</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Upload */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">ອັບໂຫຼດສະລິບການໂອນເງິນ</h3>
                   
                   {!formData.payment_slip_url ? (
-                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-purple-400 hover:bg-purple-50 transition-all">
+                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-400 hover:bg-blue-50 transition-all">
                       <input
                         type="file"
                         accept="image/jpeg,image/jpg,image/png,image/webp"
@@ -395,16 +526,13 @@ export default function BookingPage() {
                       </label>
                       
                       {uploadingSlip && (
-                        <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-xl">
-                          <div className="flex items-center space-x-3">
-                            <div className="animate-spin rounded-full h-6 w-6 border-2 border-purple-500 border-t-transparent"></div>
-                            <span className="text-purple-600 font-medium">ກຳລັງອັບໂຫຼດ...</span>
-                          </div>
+                        <div className="mt-4">
+                          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto"></div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="border-2 border-green-200 rounded-xl p-4 bg-green-50">
+                    <div className="border-2 border-green-200 rounded-xl p-6 bg-green-50">
                       <div className="flex items-center space-x-4">
                         <FiCheck className="h-8 w-8 text-green-600" />
                         <div className="flex-1">
@@ -414,7 +542,7 @@ export default function BookingPage() {
                         <button
                           type="button"
                           onClick={() => setFormData(prev => ({ ...prev, payment_slip_url: '' }))}
-                          className="text-green-600 hover:text-green-800"
+                          className="text-green-600 hover:text-green-800 underline text-sm"
                         >
                           ປ່ຽນໄຟລ໌
                         </button>
@@ -425,49 +553,47 @@ export default function BookingPage() {
               </div>
 
               {/* Terms and Conditions */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+              <div className="mt-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl">
                 <h4 className="font-semibold text-yellow-800 mb-3">📋 ເງື່ອນໄຂການຈອງ</h4>
-                <ul className="text-sm text-yellow-700 space-y-1 mb-4">
+                <ul className="text-sm text-yellow-700 space-y-1">
                   <li>• ຕ້ອງຊຳລະເງິນເຕັມຈຳນວນ ບໍ່ມີລະບົບມັດຈຳ</li>
                   <li>• ສາມາດຍົກເລີກໄດ້ພາຍໃນ 10 ຊົ່ວໂມງຫຼັງຈອງ</li>
                   <li>• Admin ຈະກວດສອບແລະອະນຸມັດພາຍໃນ 24 ຊົ່ວໂມງ</li>
                   <li>• ເມື່ອອະນຸມັດແລ້ວຈະໄດ້ຮັບ QR Code ສຳລັບເດີນທາງ</li>
                 </ul>
-                
-                <div className="flex items-center">
-                  <input 
-                    type="checkbox" 
-                    id="terms" 
-                    checked={agreedToTerms}
-                    onChange={(e) => setAgreedToTerms(e.target.checked)}
-                    className="rounded border-yellow-300 text-purple-600 focus:ring-purple-500" 
-                    required 
-                  />
-                  <label htmlFor="terms" className="ml-2 text-sm text-yellow-700">
-                    ຂ້ອຍຍອມຮັບ <button type="button" className="underline font-medium">ເງື່ອນໄຂການໃຊ້ງານ</button>
-                  </label>
-                </div>
               </div>
 
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={loading || uploadingSlip || !agreedToTerms || !formData.payment_slip_url}
-                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold py-4 px-6 rounded-xl hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 disabled:hover:scale-100"
-              >
-                {loading ? (
-                  <div className="flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-2"></div>
-                    ກຳລັງສົ່ງການຈອງ...
-                  </div>
-                ) : (
-                  'ຢືນຢັນການຈອງ'
-                )}
-              </button>
-            </form>
-          </div>
+              {/* Navigation Buttons */}
+              <div className="mt-8 flex justify-between">
+                <button
+                  onClick={handlePreviousStep}
+                  className="px-8 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-medium flex items-center"
+                >
+                  <FiArrowLeft className="mr-2" />
+                  ກັບຄືນ
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading || !validateStep(3)}
+                  className="px-8 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                      ກຳລັງສົ່ງ...
+                    </>
+                  ) : (
+                    <>
+                      <FiCreditCard className="mr-2" />
+                      ຢືນຢັນການຈອງ
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-      </section>
+      </div>
     </div>
   );
 }
