@@ -1,4 +1,4 @@
-// app/api/bookings/send-status-link/route.ts - ส่งลิงก์เช็คสถานะ
+// app/api/bookings/send-status-link/route.ts - ส่งลิงก์เช็คสถานะ (Development Mode)
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Booking from '@/models/Booking';
@@ -72,22 +72,60 @@ export async function POST(request: Request) {
       { expiresIn: '24h' }
     );
     
-    // Send email with status link
-    try {
-      await sendStatusLinkEmail(latestBooking, token);
+    // ✅ Development Mode: สร้าง status URL และส่งกลับโดยตรง
+    const statusUrl = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/booking/status?token=${token}`;
+    
+    console.log('🔗 Generated status URL for booking:', {
+      bookingId: latestBooking.booking_id,
+      customerName: latestBooking.customer_name,
+      phone: cleanPhone,
+      statusUrl: statusUrl
+    });
+    
+    // ✅ ตรวจสอบว่ามี SMTP หรือไม่
+    const transporter = createEmailTransporter();
+    
+    if (transporter) {
+      // ถ้ามี SMTP ให้ส่งอีเมลจริง
+      try {
+        await sendStatusLinkEmail(latestBooking, token);
+        
+        return NextResponse.json({
+          success: true,
+          message: 'ລິ້ງເຊັກສະຖານະໄດ້ຖືກສົ່ງໄປທີ່ອີເມລແລ້ວ',
+          email: latestBooking.customer_email
+        });
+      } catch (emailError) {
+        console.error('Failed to send status link email:', emailError);
+        
+        // ✅ ถ้าส่งอีเมลไม่ได้ ให้ส่ง URL กลับแทน
+        return NextResponse.json({
+          success: true,
+          message: 'ບໍ່สามารถສົ່ງອີເມລໄດ້ ແຕ່ສາມາດໃຊ້ລິ້ງນີ້ເພື່ອເຊັກສະຖານະ',
+          email: latestBooking.customer_email,
+          statusUrl: statusUrl,
+          developmentMode: true,
+          instructions: 'ໃນໂໝດ Development: ຄັດລອກ URL ຂ້າງເທິງເພື່ອເຊັກສະຖານະການຈອງ'
+        });
+      }
+    } else {
+      // ✅ ไม่มี SMTP - Development Mode
+      console.log('🔧 Development Mode: Returning status URL directly');
       
       return NextResponse.json({
         success: true,
-        message: 'ລິ້ງເຊັກສະຖານະໄດ້ຖືກສົ່ງໄປທີ່ອີເມລແລ້ວ',
-        email: latestBooking.customer_email
+        message: 'ໃນໂໝດ Development: ໃຊ້ລິ້ງຂ້າງລຸ່ມນີ້ເພື່ອເຊັກສະຖານະ',
+        email: latestBooking.customer_email,
+        statusUrl: statusUrl,
+        developmentMode: true,
+        instructions: 'ຄັດລອກ URL ນີ້ໄປວາງໃນ browser ເພື່ອເຊັກສະຖານະການຈອງ',
+        bookingInfo: {
+          bookingId: latestBooking.booking_id,
+          customerName: latestBooking.customer_name,
+          travelDate: latestBooking.travel_date,
+          destination: latestBooking.destination
+        }
       });
-      
-    } catch (emailError) {
-      console.error('Failed to send status link email:', emailError);
-      return NextResponse.json(
-        { error: 'ເກີດຂໍ້ຜິດພາດໃນການສົ່ງອີເມລ' },
-        { status: 500 }
-      );
     }
     
   } catch (error) {
@@ -99,7 +137,7 @@ export async function POST(request: Request) {
   }
 }
 
-// ฟังก์ชันส่งอีเมลพร้อมลิงก์เช็คสถานะ
+// ฟังก์ชันส่งอีเมลพร้อมลิงก์เช็คสถานะ (ใช้เมื่อมี SMTP)
 async function sendStatusLinkEmail(booking: any, token: string) {
   const transporter = createEmailTransporter();
   
@@ -107,7 +145,7 @@ async function sendStatusLinkEmail(booking: any, token: string) {
     throw new Error('Email transporter not configured');
   }
   
-  const statusUrl = `${process.env.NEXTAUTH_URL}/booking/status?token=${token}`;
+  const statusUrl = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/booking/status?token=${token}`;
   
   const mailOptions = {
     from: process.env.SMTP_FROM || 'noreply@busticketsystem.com',

@@ -1,4 +1,4 @@
-// app/api/bookings/[id]/route.ts - FIXED VERSION - แก้ไข Next.js 15 async params และ Ticket creation
+// app/api/bookings/[id]/route.ts - FIXED VERSION - แก้ไข Ticket creation error
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Booking from '@/models/Booking';
@@ -10,12 +10,11 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 // GET - ดึงข้อมูลการจองแต่ละรายการ
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }  // ✅ Next.js 15: params เป็น Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await connectDB();
     
-    // ✅ Await params ก่อนใช้งาน
     const { id } = await params;
     console.log('📖 Getting booking with ID:', id);
     
@@ -39,10 +38,53 @@ export async function GET(
   }
 }
 
-// PUT - อัพเดทสถานะการจอง (สำหรับ admin) - ✅ แก้ไขแล้ว
+// ✅ ฟังก์ชันสำหรับ generate unique ticket number
+const SAFE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generateUUIDTicketNumber(): string {
+  let result = 'T';
+  
+  for (let i = 0; i < 5; i++) {
+    const randomIndex = Math.floor(Math.random() * SAFE_CHARS.length);
+    result += SAFE_CHARS[randomIndex];
+  }
+  
+  return result;
+}
+
+async function generateUniqueTicketNumber(): Promise<string> {
+  const maxAttempts = 20;
+  let attempt = 0;
+  
+  while (attempt < maxAttempts) {
+    attempt++;
+    
+    const candidateNumber = generateUUIDTicketNumber();
+    
+    console.log(`🎲 Generated ticket candidate: ${candidateNumber} (attempt ${attempt})`);
+    
+    const existingTicket = await Ticket.findOne({ ticketNumber: candidateNumber });
+    
+    if (!existingTicket) {
+      console.log(`✅ Unique ticket number found: ${candidateNumber}`);
+      return candidateNumber;
+    }
+    
+    console.log(`⚠️ ${candidateNumber} already exists, trying again...`);
+  }
+  
+  // Emergency fallback
+  const timestamp = Date.now().toString().slice(-2);
+  const emergency = `T${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}${timestamp}${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}`;
+  
+  console.log(`🆘 Using emergency ticket number: ${emergency}`);
+  return emergency;
+}
+
+// PUT - อัพเดทสถานะการจอง (สำหรับ admin) - ✅ แก้ไข Ticket creation
 export async function PUT(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }  // ✅ Next.js 15: params เป็น Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     console.log('🔄 Starting booking update process...');
@@ -59,7 +101,6 @@ export async function PUT(
     
     await connectDB();
     
-    // ✅ Await params ก่อนใช้งาน
     const { id } = await params;
     console.log('📝 Updating booking with ID:', id);
     
@@ -106,8 +147,15 @@ export async function PUT(
       booking.payment_status = 'approved';
       
       try {
-        // ✅ สร้าง ticket ใหม่ - แก้ไขให้ส่ง ticketNumber
+        // ✅ สร้าง ticket ใหม่ - แก้ไขโดยสร้าง instance ก่อนแล้วค่อย save
+        console.log('🎫 Creating ticket...');
+        
+        // Generate unique ticket number ก่อน
+        const uniqueTicketNumber = await generateUniqueTicketNumber();
+        
+        // สร้าง ticket data พร้อม ticketNumber
         const ticketData = {
+          ticketNumber: uniqueTicketNumber,  // ✅ ใส่ ticketNumber ที่ generate แล้ว
           price: booking.total_price,
           paymentMethod: 'qr', // ถือว่าจ่ายผ่าน QR/โอนเงิน
           soldBy: session.user.email || session.user.name || 'Booking System',
@@ -115,12 +163,19 @@ export async function PUT(
           ticketType: booking.passenger_count > 1 ? 'group' : 'individual',
           passengerCount: booking.passenger_count,
           pricePerPerson: booking.total_price / booking.passenger_count
-          // ✅ ไม่ต้องส่ง ticketNumber เพราะ Ticket model จะ generate เอง
         };
         
-        console.log('🎫 Creating ticket with data:', ticketData);
+        console.log('🎫 Creating ticket with data:', {
+          ticketNumber: ticketData.ticketNumber,
+          price: ticketData.price,
+          ticketType: ticketData.ticketType,
+          passengerCount: ticketData.passengerCount,
+          pricePerPerson: ticketData.pricePerPerson
+        });
         
-        const ticket = await Ticket.create(ticketData);
+        // ✅ วิธีที่ 1: ใช้ new Ticket() และ save() แทน create()
+        const ticket = new Ticket(ticketData);
+        await ticket.save();
         
         console.log('✅ Ticket created successfully:', {
           ticketId: ticket._id,
@@ -134,6 +189,18 @@ export async function PUT(
         
       } catch (ticketError) {
         console.error('❌ Failed to create ticket:', ticketError);
+        
+        // ✅ แสดง error details ที่มากขึ้น
+        if (ticketError instanceof Error) {
+          console.error('Error message:', ticketError.message);
+          console.error('Error stack:', ticketError.stack);
+          
+          // แสดง validation errors ถ้ามี
+          if ('errors' in ticketError) {
+            console.error('Validation errors:', ticketError.errors);
+          }
+        }
+        
         return NextResponse.json(
           { error: 'ເກີດຂໍ້ຜິດພາດໃນການສ້າງຕັ້ວ: ' + (ticketError as Error).message },
           { status: 500 }
@@ -209,12 +276,11 @@ export async function PUT(
 // DELETE - ยกเลิกการจอง (ด้วย JWT token) - ✅ แก้ไข async params
 export async function DELETE(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }  // ✅ Next.js 15: params เป็น Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await connectDB();
     
-    // ✅ Await params ก่อนใช้งาน
     const { id } = await params;
     console.log('🗑️ Cancelling booking with ID:', id);
     

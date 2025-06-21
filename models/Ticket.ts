@@ -1,4 +1,4 @@
-// models/Ticket.ts - FIXED VERSION - แก้ไข auto-generate ticketNumber
+// models/Ticket.ts - FIXED VERSION - แก้ไข ticketNumber validation และ pre-save middleware
 import mongoose, { Document, Model } from 'mongoose';
 
 export interface ITicketDocument extends Document {
@@ -19,7 +19,7 @@ const ticketSchema = new mongoose.Schema({
     type: String, 
     required: true, 
     unique: true 
-    // ✅ จะถูก generate ใน pre-save middleware
+    // ✅ ลบ validation ที่ซับซ้อนออก เพราะจะถูก set ก่อน save
   },
   price: { 
     type: Number, 
@@ -65,17 +65,20 @@ ticketSchema.index({ ticketType: 1 });
 ticketSchema.index({ passengerCount: 1 });
 ticketSchema.index({ soldAt: -1, ticketType: 1 });
 
-// ✅ Auto-generate ticketNumber ใน pre-save middleware
+// ✅ แก้ไข pre-save middleware ให้ทำงานเฉพาะเมื่อจำเป็น
 ticketSchema.pre('save', async function(next) {
   try {
-    // ถ้ายังไม่มี ticketNumber ให้ generate ใหม่
-    if (!this.ticketNumber) {
+    // ✅ ถ้า ticketNumber ไม่มีหรือเป็นค่าว่าง ให้ generate ใหม่
+    if (!this.ticketNumber || this.ticketNumber.trim() === '') {
+      console.log('🎫 Generating ticket number in pre-save...');
       this.ticketNumber = await generateUniqueTicketNumber();
+      console.log('✅ Generated ticket number:', this.ticketNumber);
     }
     
     // ตรวจสอบว่า price = pricePerPerson * passengerCount
     const expectedPrice = this.pricePerPerson * this.passengerCount;
     if (this.price !== expectedPrice) {
+      console.log(`💰 Adjusting price: ${this.price} -> ${expectedPrice}`);
       this.price = expectedPrice;
     }
     
@@ -85,11 +88,13 @@ ticketSchema.pre('save', async function(next) {
     }
     
     if (this.ticketType === 'individual' && this.passengerCount !== 1) {
+      console.log('👤 Adjusting passenger count for individual ticket to 1');
       this.passengerCount = 1;
     }
     
     next();
   } catch (error) {
+    console.error('❌ Error in Ticket pre-save:', error);
     next(error as Error);
   }
 });
@@ -109,12 +114,15 @@ function generateUUIDTicketNumber(): string {
 }
 
 async function generateUniqueTicketNumber(): Promise<string> {
+  // ✅ ใช้ dynamic import เพื่อหลีกเลี่ยง circular dependency
   const TicketModel = mongoose.models.Ticket;
   if (!TicketModel) {
-    throw new Error('Ticket model not found');
+    console.warn('⚠️ Ticket model not found, using timestamp fallback');
+    const timestamp = Date.now().toString().slice(-5);
+    return `T${timestamp}`;
   }
   
-  const maxAttempts = 20;
+  const maxAttempts = 10; // ลดจาก 20 เป็น 10 เพื่อลด overhead
   let attempt = 0;
   
   while (attempt < maxAttempts) {
@@ -122,25 +130,75 @@ async function generateUniqueTicketNumber(): Promise<string> {
     
     const candidateNumber = generateUUIDTicketNumber();
     
-    console.log(`🎲 Generated ticket candidate: ${candidateNumber} (attempt ${attempt})`);
-    
-    const existingTicket = await TicketModel.findOne({ ticketNumber: candidateNumber });
-    
-    if (!existingTicket) {
-      console.log(`✅ Unique ticket number found: ${candidateNumber}`);
-      return candidateNumber;
+    try {
+      const existingTicket = await TicketModel.findOne({ ticketNumber: candidateNumber });
+      
+      if (!existingTicket) {
+        console.log(`✅ Unique ticket number found: ${candidateNumber} (attempt ${attempt})`);
+        return candidateNumber;
+      }
+      
+      console.log(`⚠️ ${candidateNumber} already exists, trying again... (attempt ${attempt})`);
+    } catch (error) {
+      console.error(`❌ Error checking ticket uniqueness (attempt ${attempt}):`, error);
+      // ถ้าเกิด error ในการเช็ค ให้ใช้ timestamp fallback
+      break;
     }
-    
-    console.log(`⚠️ ${candidateNumber} already exists, trying again...`);
   }
   
   // 🆘 Emergency fallback
-  const timestamp = Date.now().toString().slice(-2);
-  const emergency = `T${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}${timestamp}${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}${SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)]}`;
+  const timestamp = Date.now().toString().slice(-4);
+  const randomChar = SAFE_CHARS[Math.floor(Math.random() * SAFE_CHARS.length)];
+  const emergency = `T${randomChar}${timestamp}`;
   
   console.log(`🆘 Using emergency ticket number: ${emergency}`);
   return emergency;
 }
+
+// ✅ เพิ่ม Static Method: สร้าง ticket อย่างปลอดภัย
+ticketSchema.statics.createSafely = async function(ticketData: any) {
+  const maxRetries = 3;
+  
+  for (let retry = 1; retry <= maxRetries; retry++) {
+    try {
+      console.log(`💾 Creating ticket (attempt ${retry}/${maxRetries})`);
+      
+      // ✅ ถ้าไม่มี ticketNumber ให้ generate ก่อน
+      if (!ticketData.ticketNumber) {
+        ticketData.ticketNumber = await generateUniqueTicketNumber();
+      }
+      
+      console.log('📝 Ticket data for creation:', {
+        ticketNumber: ticketData.ticketNumber,
+        ticketType: ticketData.ticketType || 'individual',
+        passengerCount: ticketData.passengerCount || 1,
+        price: ticketData.price
+      });
+      
+      // ใช้ new + save แทน create
+      const ticket = new this(ticketData);
+      await ticket.save();
+      
+      console.log(`🎉 Ticket created successfully: ${ticket.ticketNumber}`);
+      return ticket;
+      
+    } catch (error: any) {
+      console.error(`❌ Create attempt ${retry} failed:`, error.message);
+      
+      if (error.code === 11000 && retry < maxRetries) {
+        console.log(`🔄 Duplicate key detected, retrying...`);
+        // ถ้าเป็น duplicate key ให้ลบ ticketNumber ออกและให้ generate ใหม่
+        delete ticketData.ticketNumber;
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+  
+  throw new Error('Failed to create ticket after multiple attempts');
+};
 
 // ✅ เพิ่ม Virtual Fields
 ticketSchema.virtual('isGroupTicket').get(function() {

@@ -1,4 +1,4 @@
-// app/booking/status/page.tsx - หน้าเช็คสถานะการจอง
+// app/booking/status/page.tsx - หน้าเช็คสถานะการจอง (Enhanced for Development)
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
@@ -12,7 +12,9 @@ import {
   FiAlertCircle,
   FiX,
   FiMessageCircle,
-  FiRefreshCw
+  FiRefreshCw,
+  FiCopy,
+  FiExternalLink
 } from 'react-icons/fi';
 
 interface BookingData {
@@ -34,6 +36,8 @@ interface BookingData {
 function StatusChecker() {
   const [phone, setPhone] = useState('');
   const [sending, setSending] = useState(false);
+  const [statusUrl, setStatusUrl] = useState('');
+  const [developmentMode, setDevelopmentMode] = useState(false);
 
   const handleSendStatusLink = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,7 +59,15 @@ function StatusChecker() {
       const result = await response.json();
 
       if (result.success) {
-        toast.success(`ລິ້ງເຊັກສະຖານະໄດ້ຖືກສົ່ງໄປ ${result.email}`);
+        if (result.developmentMode && result.statusUrl) {
+          // Development mode - แสดง URL ให้คัดลอก
+          setStatusUrl(result.statusUrl);
+          setDevelopmentMode(true);
+          toast.success('🔧 Development Mode: ລິ້ງເຊັກສະຖານະພ້ອມແລ້ວ!');
+        } else {
+          // Production mode - ส่งอีเมลแล้ว
+          toast.success(`ລິ້ງເຊັກສະຖານະໄດ້ຖືກສົ່ງໄປ ${result.email}`);
+        }
         setPhone('');
       } else {
         toast.error(result.error || 'ເກີດຂໍ້ຜິດພາດ');
@@ -66,6 +78,19 @@ function StatusChecker() {
     } finally {
       setSending(false);
     }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('ຄັດລອກລິ້ງແລ້ວ!');
+    } catch (error) {
+      toast.error('ບໍ່ສາມາດຄັດລອກໄດ້');
+    }
+  };
+
+  const openInNewTab = (url: string) => {
+    window.open(url, '_blank');
   };
 
   return (
@@ -101,14 +126,72 @@ function StatusChecker() {
           ) : (
             <>
               <FiSend className="mr-2" />
-              ສົ່ງລິ້ງເຊັກສະຖານະ
+              ເຊັກສະຖານະການຈອງ
             </>
           )}
         </button>
       </form>
       
+      {/* ✅ Development Mode: แสดง URL สำหรับคัดลอก */}
+      {developmentMode && statusUrl && (
+        <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
+          <div className="flex items-center mb-3">
+            <FiAlertCircle className="w-5 h-5 text-yellow-600 mr-2" />
+            <span className="font-medium text-yellow-800">🔧 Development Mode</span>
+          </div>
+          
+          <p className="text-sm text-yellow-700 mb-3">
+            ເນື່ອງຈາກບໍ່ໄດ້ຕັ້ງຄ່າ Email Server, ກະລຸນາໃຊ້ລິ້ງນີ້ເພື່ອເຊັກສະຖານະ:
+          </p>
+          
+          <div className="bg-white p-3 rounded-lg border border-yellow-300 mb-3">
+            <div className="flex items-center justify-between">
+              <code className="text-xs text-gray-700 break-all flex-1 mr-2">
+                {statusUrl}
+              </code>
+              <div className="flex space-x-1">
+                <button
+                  onClick={() => copyToClipboard(statusUrl)}
+                  className="p-2 text-yellow-600 hover:text-yellow-800 transition-colors"
+                  title="ຄັດລອກລິ້ງ"
+                >
+                  <FiCopy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => openInNewTab(statusUrl)}
+                  className="p-2 text-yellow-600 hover:text-yellow-800 transition-colors"
+                  title="ເປີດໃນແທັບໃໝ່"
+                >
+                  <FiExternalLink className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex space-x-2">
+            <button
+              onClick={() => copyToClipboard(statusUrl)}
+              className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+            >
+              <FiCopy className="mr-2 w-4 h-4" />
+              ຄັດລອກລິ້ງ
+            </button>
+            <button
+              onClick={() => openInNewTab(statusUrl)}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center"
+            >
+              <FiExternalLink className="mr-2 w-4 h-4" />
+              ເປີດລິ້ງ
+            </button>
+          </div>
+        </div>
+      )}
+      
       <p className="text-xs text-gray-500 mt-3 text-center">
-        ລິ້ງເຊັກສະຖານະຈະຖືກສົ່ງໄປທີ່ອີເມລຂອງທ່ານ
+        {developmentMode 
+          ? 'ໃນໂໝດ Development ລິ້ງຈະຖືກສະແດງໃຫ້ຄັດລອກໂດຍຕົງ' 
+          : 'ລິ້ງເຊັກສະຖານະຈະຖືກສົ່ງໄປທີ່ອີເມລຂອງທ່ານ'
+        }
       </p>
     </div>
   );
